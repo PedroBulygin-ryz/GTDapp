@@ -19,6 +19,7 @@ const defaultState = {
   selectedOrganizeTaskId: "",
   expandedHistoryTaskIds: [],
   historyPage: 0,
+  showShortcutHelp: false,
 };
 
 let state = loadState();
@@ -243,9 +244,11 @@ function renderCollectView() {
       <div class="quick-actions">
         <button class="secondary-button" data-refresh-quick-inbox>Revisar inbox.txt</button>
         <button class="primary-button" data-import-quick-inbox ${quickInbox.lines.length ? "" : "disabled"}>Importar</button>
+        <button class="help-button" data-toggle-shortcut-help title="Como usar capturas rapidas">?</button>
       </div>
       <input class="hidden-file" type="file" accept=".txt,text/plain" data-quick-inbox-file />
     </section>
+    ${state.showShortcutHelp ? renderShortcutHelp() : ""}
 
     <section class="stage-list" aria-label="Tareas recopiladas">
       <div class="section-title">
@@ -256,6 +259,18 @@ function renderCollectView() {
     </section>
   `;
   els.focus.querySelector("input")?.focus();
+}
+
+function renderShortcutHelp() {
+  return `
+    <aside class="shortcut-help">
+      <button class="close-details" data-toggle-shortcut-help title="Cerrar ayuda">×</button>
+      <h3>Capturas rapidas con atajos</h3>
+      <p><strong>Option + Space</strong>: abre una ventanita para escribir una captura y guardarla en <code>inbox.txt</code>.</p>
+      <p><strong>Control + Option + Delete</strong>: vacia <code>inbox.txt</code> despues de confirmar.</p>
+      <p>En esta pestaña, toca <strong>Revisar inbox.txt</strong>, selecciona el archivo y luego <strong>Importar</strong> para traer esas capturas a Recopilar.</p>
+    </aside>
+  `;
 }
 
 function renderProcessView() {
@@ -801,6 +816,12 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-import-quick-inbox]")) {
     importQuickInbox();
+    return;
+  }
+
+  if (event.target.closest("[data-toggle-shortcut-help]")) {
+    state.showShortcutHelp = !state.showShortcutHelp;
+    saveAndRender();
     return;
   }
 
