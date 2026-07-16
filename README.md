@@ -13,11 +13,13 @@ No hace falta instalar nada.
 
 ## Donde se guardan los datos
 
-Las tareas se guardan localmente en el navegador de cada persona. Eso significa que:
+Por defecto, las tareas se guardan localmente en el navegador de cada persona. Eso significa que:
 
 - Las notas de una persona no se suben a GitHub.
 - Cada navegador tiene sus propios datos.
 - Si se borra el historial o los datos del sitio, se pueden perder las tareas guardadas.
+
+La app tambien puede conectarse a un archivo local `bubbles-data.json` desde la pestaña **Recopilar**. Con ese archivo conectado, Bubbles puede guardar una copia local fuera del navegador y cargarla de nuevo si hiciera falta.
 
 ## Capturas rapidas
 

@@ -9,6 +9,10 @@ const BUBBLES = [
 ];
 
 const STORAGE_KEY = "bubbles-gtd-v2";
+const DATA_FILE_DB = "bubbles-gtd-file";
+const DATA_FILE_STORE = "handles";
+const DATA_FILE_KEY = "primary";
+const DATA_FILE_VERSION = 1;
 
 const defaultState = {
   tasks: [],
@@ -25,6 +29,15 @@ const defaultState = {
 };
 
 let state = loadState();
+let dataFile = {
+  handle: null,
+  name: "",
+  status: "Usando guardado del navegador.",
+  connected: false,
+  autoSave: false,
+  supported: "showOpenFilePicker" in window && "showSaveFilePicker" in window,
+};
+let dataFileWriteQueue = Promise.resolve();
 let quickInbox = {
   fileName: "",
   lines: [],
@@ -54,6 +67,102 @@ function saveState() {
   } catch {
     // Si el navegador bloquea localStorage, la sesion actual sigue funcionando.
   }
+  queueDataFileWrite();
+}
+
+function exportData() {
+  return {
+    app: "Bubbles GTD",
+    version: DATA_FILE_VERSION,
+    exportedAt: new Date().toISOString(),
+    state,
+  };
+}
+
+function normalizeImportedState(data) {
+  const importedState = data?.state || data;
+  if (!importedState || !Array.isArray(importedState.tasks)) {
+    throw new Error("Archivo invalido");
+  }
+  return { ...defaultState, ...importedState };
+}
+
+function openDataFileDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATA_FILE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(DATA_FILE_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getStoredDataFileHandle() {
+  const db = await openDataFileDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DATA_FILE_STORE, "readonly");
+    const request = tx.objectStore(DATA_FILE_STORE).get(DATA_FILE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function storeDataFileHandle(handle) {
+  const db = await openDataFileDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DATA_FILE_STORE, "readwrite");
+    tx.objectStore(DATA_FILE_STORE).put(handle, DATA_FILE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function hasDataFilePermission(handle, request = false) {
+  const options = { mode: "readwrite" };
+  if ((await handle.queryPermission(options)) === "granted") return true;
+  return request && (await handle.requestPermission(options)) === "granted";
+}
+
+async function initStoredDataFile() {
+  if (!dataFile.supported) {
+    dataFile.status = "Tu navegador no permite guardar en un archivo local desde esta vista.";
+    render();
+    return;
+  }
+  try {
+    const handle = await getStoredDataFileHandle();
+    if (!handle) return;
+    dataFile.handle = handle;
+    dataFile.name = handle.name;
+    dataFile.connected = await hasDataFilePermission(handle);
+    dataFile.autoSave = dataFile.connected;
+    dataFile.status = dataFile.connected
+      ? `Archivo conectado: ${handle.name}`
+      : `Archivo recordado: ${handle.name}. Falta dar permiso.`;
+    render();
+  } catch {
+    dataFile.status = "No pude recuperar el archivo de datos anterior.";
+    render();
+  }
+}
+
+async function writeDataFile() {
+  if (!dataFile.handle || !dataFile.connected || !dataFile.autoSave) return;
+  const writable = await dataFile.handle.createWritable();
+  await writable.write(JSON.stringify(exportData(), null, 2));
+  await writable.close();
+  dataFile.status = `Guardado en ${dataFile.name || dataFile.handle.name}`;
+}
+
+function queueDataFileWrite() {
+  if (!dataFile.handle || !dataFile.connected || !dataFile.autoSave) return;
+  dataFileWriteQueue = dataFileWriteQueue
+    .then(() => writeDataFile())
+    .catch(() => {
+      dataFile.status = "No pude guardar en el archivo. Volve a conectarlo.";
+      dataFile.connected = false;
+      dataFile.autoSave = false;
+      render();
+    });
 }
 
 function uid() {
@@ -237,6 +346,8 @@ function renderCollectView() {
       <button type="submit">Agregar</button>
     </form>
 
+    ${renderDataFilePanel()}
+
     <section class="quick-inbox" aria-label="Capturas rapidas">
       <div>
         <h3>Capturas rapidas</h3>
@@ -261,6 +372,26 @@ function renderCollectView() {
     </section>
   `;
   els.focus.querySelector("input")?.focus();
+}
+
+function renderDataFilePanel() {
+  const disabled = dataFile.supported ? "" : "disabled";
+  const connected = dataFile.connected && dataFile.handle;
+  return `
+    <section class="data-file-panel" aria-label="Archivo de datos local">
+      <div>
+        <h3>Archivo de datos local</h3>
+        <p>${escapeHtml(dataFile.status)}</p>
+      </div>
+      <span class="quick-status ${connected ? "has-items" : ""}" title="Estado del archivo">${connected ? "OK" : "?"}</span>
+      <div class="quick-actions">
+        <button class="secondary-button" data-open-data-file ${disabled}>Elegir archivo</button>
+        <button class="secondary-button" data-create-data-file ${disabled}>Crear archivo</button>
+        <button class="secondary-button" data-load-data-file ${connected ? "" : "disabled"}>Cargar</button>
+        <button class="primary-button" data-save-data-file ${connected ? "" : "disabled"}>Guardar ahora</button>
+      </div>
+    </section>
+  `;
 }
 
 function renderShortcutHelp() {
@@ -836,6 +967,26 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-open-data-file]")) {
+    connectDataFile();
+    return;
+  }
+
+  if (event.target.closest("[data-create-data-file]")) {
+    createDataFile();
+    return;
+  }
+
+  if (event.target.closest("[data-load-data-file]")) {
+    loadFromDataFile();
+    return;
+  }
+
+  if (event.target.closest("[data-save-data-file]")) {
+    saveDataFileNow();
+    return;
+  }
+
   if (event.target.closest("[data-refresh-quick-inbox]")) {
     refreshQuickInbox();
     return;
@@ -1060,6 +1211,121 @@ function importQuickInbox() {
   saveAndRender();
 }
 
+async function connectDataFile() {
+  if (!dataFile.supported) {
+    alert("Este navegador no permite elegir un archivo local de datos desde aca.");
+    return;
+  }
+  try {
+    const [handle] = await showOpenFilePicker({
+      multiple: false,
+      types: [
+        {
+          description: "Datos de Bubbles",
+          accept: { "application/json": [".json"] },
+        },
+      ],
+    });
+    if (!(await hasDataFilePermission(handle, true))) {
+      dataFile.status = "No se dio permiso para escribir en el archivo.";
+      render();
+      return;
+    }
+    dataFile.handle = handle;
+    dataFile.name = handle.name;
+    dataFile.connected = true;
+    dataFile.autoSave = false;
+    dataFile.status = `Archivo conectado: ${handle.name}. Carga sus datos o guarda los actuales.`;
+    try {
+      await storeDataFileHandle(handle);
+    } catch {
+      dataFile.status = `Archivo conectado: ${handle.name}. Chrome puede pedir elegirlo de nuevo mas adelante.`;
+    }
+    render();
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    dataFile.status = "No pude conectar el archivo.";
+    render();
+  }
+}
+
+async function createDataFile() {
+  if (!dataFile.supported) {
+    alert("Este navegador no permite crear un archivo local de datos desde aca.");
+    return;
+  }
+  try {
+    const handle = await showSaveFilePicker({
+      suggestedName: "bubbles-data.json",
+      types: [
+        {
+          description: "Datos de Bubbles",
+          accept: { "application/json": [".json"] },
+        },
+      ],
+    });
+    if (!(await hasDataFilePermission(handle, true))) {
+      dataFile.status = "No se dio permiso para escribir en el archivo.";
+      render();
+      return;
+    }
+    dataFile.handle = handle;
+    dataFile.name = handle.name;
+    dataFile.connected = true;
+    dataFile.autoSave = true;
+    try {
+      await storeDataFileHandle(handle);
+    } catch {
+      dataFile.status = `Archivo creado: ${handle.name}. Chrome puede pedir elegirlo de nuevo mas adelante.`;
+    }
+    await writeDataFile();
+    render();
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    dataFile.status = "No pude crear el archivo de datos.";
+    render();
+  }
+}
+
+async function loadFromDataFile() {
+  if (!dataFile.handle) return;
+  try {
+    if (!(await hasDataFilePermission(dataFile.handle, true))) {
+      dataFile.status = "No se dio permiso para leer el archivo.";
+      render();
+      return;
+    }
+    const file = await dataFile.handle.getFile();
+    const text = await file.text();
+    state = normalizeImportedState(JSON.parse(text));
+    dataFile.connected = true;
+    dataFile.autoSave = true;
+    dataFile.status = `Datos cargados desde ${dataFile.name || dataFile.handle.name}`;
+    saveAndRender();
+  } catch {
+    dataFile.status = "No pude cargar ese archivo de datos.";
+    render();
+  }
+}
+
+async function saveDataFileNow() {
+  if (!dataFile.handle) return;
+  try {
+    if (!(await hasDataFilePermission(dataFile.handle, true))) {
+      dataFile.status = "No se dio permiso para escribir en el archivo.";
+      render();
+      return;
+    }
+    dataFile.connected = true;
+    dataFile.autoSave = true;
+    await writeDataFile();
+    render();
+  } catch {
+    dataFile.status = "No pude guardar en el archivo.";
+    render();
+  }
+}
+
 function completeTask(id) {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) return;
@@ -1106,3 +1372,4 @@ function toggleTaskHistory(taskId) {
 }
 
 render();
+initStoredDataFile();
