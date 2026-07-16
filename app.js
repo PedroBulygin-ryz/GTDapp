@@ -13,6 +13,7 @@ const DATA_FILE_DB = "bubbles-gtd-file";
 const DATA_FILE_STORE = "handles";
 const DATA_FILE_KEY = "primary";
 const DATA_FILE_VERSION = 1;
+const DEFAULT_OWNER = "Yo";
 
 const defaultState = {
   tasks: [],
@@ -25,6 +26,7 @@ const defaultState = {
   historyPage: 0,
   donePage: 0,
   reviewDoneOpen: false,
+  expandedCompletedWeekKeys: null,
   showShortcutHelp: false,
 };
 
@@ -55,7 +57,7 @@ function loadState() {
   try {
     const v2 = localStorage.getItem(STORAGE_KEY);
     const v1 = localStorage.getItem("bubbles-gtd-v1");
-    return { ...defaultState, ...JSON.parse(v2 || v1 || "{}") };
+    return normalizeState({ ...defaultState, ...JSON.parse(v2 || v1 || "{}") });
   } catch {
     return { ...defaultState };
   }
@@ -84,7 +86,18 @@ function normalizeImportedState(data) {
   if (!importedState || !Array.isArray(importedState.tasks)) {
     throw new Error("Archivo invalido");
   }
-  return { ...defaultState, ...importedState };
+  return normalizeState({ ...defaultState, ...importedState });
+}
+
+function normalizeState(nextState) {
+  return {
+    ...defaultState,
+    ...nextState,
+    tasks: (nextState.tasks || []).map((task) => ({
+      ...task,
+      owner: task.owner?.trim() || DEFAULT_OWNER,
+    })),
+  };
 }
 
 function openDataFileDb() {
@@ -183,7 +196,7 @@ function createTask(title) {
     dueDate: "",
     completedAt: "",
     nextAction: "",
-    owner: "",
+    owner: DEFAULT_OWNER,
     status: "unprocessed",
     doneChecklist: {
       verified: false,
@@ -213,7 +226,7 @@ function createTasks(titles, sourceText = "Importada desde capturas rapidas") {
     dueDate: "",
     completedAt: "",
     nextAction: "",
-    owner: "",
+    owner: DEFAULT_OWNER,
     status: "unprocessed",
     doneChecklist: {
       verified: false,
@@ -277,6 +290,21 @@ function getTasks(bubble) {
   return state.tasks.filter((task) => task.bubble === bubble);
 }
 
+function sortByDueDate(tasks) {
+  return [...tasks].sort((a, b) => {
+    const aTime = dueDateTime(a.dueDate);
+    const bTime = dueDateTime(b.dueDate);
+    if (aTime !== bTime) return aTime - bTime;
+    return new Date(a.createdAt || a.updatedAt) - new Date(b.createdAt || b.updatedAt);
+  });
+}
+
+function dueDateTime(value) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const date = parseDueDate(value);
+  return date ? date.getTime() : Number.POSITIVE_INFINITY;
+}
+
 function saveAndRender() {
   saveState();
   render();
@@ -316,6 +344,7 @@ function renderFocus() {
     organize: renderOrganizeView,
     review: renderReviewView,
     do: renderDoView,
+    history: renderHistoryView,
   };
   els.focus.innerHTML = "";
   views[state.currentView]();
@@ -450,7 +479,7 @@ function renderOrganizeView() {
     <section class="organize-grid">
       ${organizedBubbles
         .map((bubble) => {
-          const tasks = getTasks(bubble.id);
+          const tasks = sortByDueDate(getTasks(bubble.id));
           return `
             <article class="bubble compact-bubble">
               <header>
@@ -517,7 +546,7 @@ function renderReviewView() {
         <h3>Items que conviene revisar</h3>
         <span>${inbox.length + projectsWithoutAction.length + waitingWithoutOwner.length + waitingWithoutDate.length}</span>
       </div>
-      ${renderReviewIssueList([...inbox, ...projectsWithoutAction, ...waitingWithoutOwner, ...waitingWithoutDate])}
+      ${renderReviewIssueList(sortByDueDate([...inbox, ...projectsWithoutAction, ...waitingWithoutOwner, ...waitingWithoutDate]))}
     </section>
 
     <section class="stage-list">
@@ -547,7 +576,7 @@ function renderReviewView() {
 }
 
 function renderDoView() {
-  const next = getTasks("next");
+  const next = sortByDueDate(getTasks("next"));
   const selected = next.find((task) => task.id === state.selectedTaskId) || next[0];
 
   els.focus.innerHTML = `
@@ -583,16 +612,41 @@ function renderDoView() {
   `;
 }
 
+function renderHistoryView() {
+  const weeks = getCompletedWeeks();
+  initializeCompletedWeeks(weeks);
+  els.focus.innerHTML = `
+    <header class="stage-header">
+      <span class="stage-number">6</span>
+      <div>
+        <p class="stage-label">Archivo de avance</p>
+        <h2>Historial</h2>
+        <p>Revisa lo cerrado por semana. Sirve para ver progreso sin mezclarlo con la revision del sistema.</p>
+      </div>
+    </header>
+
+    <section class="stage-list">
+      <div class="section-title">
+        <h3>Tareas realizadas por semana</h3>
+        <span>${weeks.reduce((total, week) => total + week.tasks.length, 0)}</span>
+      </div>
+      ${renderCompletedWeeks(weeks)}
+    </section>
+  `;
+}
+
 function renderSimpleTaskList(tasks, emptyText) {
   if (!tasks.length) return `<div class="empty">${emptyText}</div>`;
+  const sortedTasks = sortByDueDate(tasks);
   return `
     <div class="task-list">
-      ${tasks
+      ${sortedTasks
         .map(
           (task) => `
             <article class="task-card compact-card">
               <div>
                 <h3>${escapeHtml(task.title)}</h3>
+                ${renderDueBadge(task)}
                 <p>Ingresada: ${formatDate(task.createdAt)}</p>
               </div>
               <button class="icon-button" data-delete="${task.id}" title="Eliminar">x</button>
@@ -606,13 +660,15 @@ function renderSimpleTaskList(tasks, emptyText) {
 
 function renderSelectableTaskList(tasks, selectedId) {
   if (!tasks.length) return `<div class="empty">No hay tareas recopiladas para procesar.</div>`;
+  const sortedTasks = sortByDueDate(tasks);
   return `
     <div class="task-list">
-      ${tasks
+      ${sortedTasks
         .map(
           (task) => `
             <button class="task-select ${task.id === selectedId ? "selected" : ""}" data-select="${task.id}">
               <strong>${escapeHtml(task.title)}</strong>
+              ${renderDueBadge(task)}
               <span>${formatDate(task.createdAt)}</span>
             </button>
           `,
@@ -623,6 +679,7 @@ function renderSelectableTaskList(tasks, selectedId) {
 }
 
 function renderDecisionMenu(task) {
+  const dependsOnOther = task.owner && task.owner !== DEFAULT_OWNER;
   return `
     <article class="decision-card" data-task-id="${task.id}">
       <p class="stage-label">Item seleccionado</p>
@@ -652,10 +709,18 @@ function renderDecisionMenu(task) {
           Proxima accion concreta
           <input data-field="nextAction" value="${escapeAttr(task.nextAction)}" placeholder="Ej: responder mail a Ana" />
         </label>
-        <label>
-          Responsable o persona esperada
-          <input data-field="owner" value="${escapeAttr(task.owner)}" placeholder="Yo, nombre, equipo..." />
-        </label>
+        <div class="owner-choice">
+          <input type="hidden" data-field="owner" value="${escapeAttr(dependsOnOther ? task.owner : DEFAULT_OWNER)}" />
+          <label class="check-option">
+            <input type="checkbox" data-owner-other ${dependsOnOther ? "checked" : ""} />
+            Depende de otra persona
+          </label>
+          <label class="owner-other-field ${dependsOnOther ? "" : "is-hidden"}">
+            Persona o equipo esperado
+            <input data-owner-other-input value="${escapeAttr(dependsOnOther ? task.owner : "")}" placeholder="Nombre, equipo, proveedor..." />
+          </label>
+          <p class="task-meta">Si no marcas nada, queda como responsable: ${DEFAULT_OWNER}.</p>
+        </div>
         <label>
           Fecha limite si corresponde
           <input data-field="dueDate" type="date" value="${escapeAttr(task.dueDate)}" />
@@ -688,14 +753,16 @@ function renderEmptyProcessing() {
 
 function renderOrganizeTaskList(tasks) {
   if (!tasks.length) return `<div class="empty">Sin pendientes</div>`;
+  const sortedTasks = sortByDueDate(tasks);
   return `
     <div class="task-list">
-      ${tasks
+      ${sortedTasks
         .map(
           (task) => `
             <article class="task-card organize-card ${state.selectedOrganizeTaskId === task.id ? "expanded" : ""}" data-task-id="${task.id}">
               <div class="organize-summary" data-open-organize-task="${task.id}">
                 <h3>${escapeHtml(task.title)}</h3>
+                ${renderDueBadge(task)}
                 <p>${escapeHtml(task.nextAction || task.owner || task.dueDate || "Sin detalle")}</p>
                 <p class="task-meta">Ingresada: ${formatDate(task.createdAt)}</p>
               </div>
@@ -782,6 +849,62 @@ function renderDoneList(tasks) {
             </article>
           `,
         )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCompletedWeeks(weeks) {
+  if (!weeks.length) return `<div class="empty">Todavia no hay tareas cerradas.</div>`;
+  const expanded = new Set(state.expandedCompletedWeekKeys || []);
+  return `
+    <div class="week-list">
+      ${weeks
+        .map((week) => {
+          const isOpen = expanded.has(week.key);
+          return `
+            <article class="week-group">
+              <button class="week-header" data-toggle-history-week="${week.key}">
+                <div>
+                  <h3>${escapeHtml(week.label)}</h3>
+                  <p>${isOpen ? "Ocultar tareas realizadas" : "Ver tareas realizadas"}</p>
+                </div>
+                <span>${week.tasks.length}</span>
+              </button>
+              ${
+                isOpen
+                  ? `<div class="week-body">${renderCompletedWeekTasks(week.tasks)}</div>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCompletedWeekTasks(tasks) {
+  return `
+    <div class="task-list">
+      ${tasks
+        .map((task) => {
+          const lastAction = getLastActionText(task);
+          return `
+            <article class="task-card compact-card done-card">
+              <div>
+                <h3>${escapeHtml(task.title)}</h3>
+                <p>Cerrada: ${formatDate(task.completedAt || task.updatedAt)}</p>
+                <p class="task-meta">Ingresada: ${formatDate(task.createdAt)}</p>
+                ${
+                  lastAction
+                    ? `<p class="task-meta">Ultimo avance: ${escapeHtml(lastAction)}</p>`
+                    : `<p class="task-meta">${(task.history || []).length} movimientos registrados</p>`
+                }
+              </div>
+            </article>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -931,6 +1054,129 @@ function formatDate(value) {
   }).format(date);
 }
 
+function getCompletedWeeks() {
+  const closedTasks = sortByCompletedDate(getTasks("done"));
+  const weeks = new Map();
+  closedTasks.forEach((task) => {
+    const closedAt = parseDate(task.completedAt || task.updatedAt);
+    const weekStart = getWeekStart(closedAt || new Date());
+    const key = toDateKey(weekStart);
+    if (!weeks.has(key)) {
+      weeks.set(key, {
+        key,
+        start: weekStart,
+        end: addDays(weekStart, 6),
+        tasks: [],
+      });
+    }
+    weeks.get(key).tasks.push(task);
+  });
+  return [...weeks.values()]
+    .sort((a, b) => b.start - a.start)
+    .map((week) => ({
+      ...week,
+      label: `Semana del ${formatWeekDay(week.start)} al ${formatWeekDay(week.end)}`,
+    }));
+}
+
+function initializeCompletedWeeks(weeks) {
+  if (Array.isArray(state.expandedCompletedWeekKeys)) return;
+  state.expandedCompletedWeekKeys = weeks[0] ? [weeks[0].key] : [];
+  saveState();
+}
+
+function sortByCompletedDate(tasks) {
+  return [...tasks].sort(
+    (a, b) => {
+      const aDate = parseDate(a.completedAt || a.updatedAt);
+      const bDate = parseDate(b.completedAt || b.updatedAt);
+      return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+    },
+  );
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getWeekStart(date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay() || 7;
+  start.setDate(start.getDate() - day + 1);
+  return start;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatWeekDay(date) {
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
+function getLastActionText(task) {
+  return (task.history || [])
+    .slice()
+    .reverse()
+    .find((entry) => entry.text.startsWith("Accion realizada:"))?.text;
+}
+
+function parseDueDate(value) {
+  if (!value) return null;
+  const [year, month, day] = String(value).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function renderDueBadge(task) {
+  const date = parseDueDate(task.dueDate);
+  if (!date) return "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((date - today) / 86400000);
+  let label = `Fecha: ${formatShortDueDate(task.dueDate)}`;
+  let tone = "future";
+  if (diffDays < 0) {
+    label = `Vencida hace ${Math.abs(diffDays)} dia${Math.abs(diffDays) === 1 ? "" : "s"}`;
+    tone = "overdue";
+  } else if (diffDays === 0) {
+    label = "Vence hoy";
+    tone = "today";
+  } else if (diffDays === 1) {
+    label = "Vence manana";
+    tone = "soon";
+  } else if (diffDays <= 7) {
+    label = `Vence en ${diffDays} dias`;
+    tone = "soon";
+  }
+  return `<span class="due-badge ${tone}">${escapeHtml(label)}</span>`;
+}
+
+function formatShortDueDate(value) {
+  const date = parseDueDate(value);
+  if (!date) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (char) => {
     const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
@@ -1050,6 +1296,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const historyWeekButton = event.target.closest("[data-toggle-history-week]");
+  if (historyWeekButton) {
+    toggleCompletedWeek(historyWeekButton.dataset.toggleHistoryWeek);
+    return;
+  }
+
   const historyPageButton = event.target.closest("[data-history-page]");
   if (historyPageButton && !historyPageButton.disabled) {
     state.historyPage += historyPageButton.dataset.historyPage === "next" ? 1 : -1;
@@ -1120,6 +1372,17 @@ document.addEventListener("change", (event) => {
     return;
   }
 
+  const ownerOther = event.target.closest("[data-owner-other]");
+  if (ownerOther) {
+    const ownerChoice = ownerOther.closest(".owner-choice");
+    const ownerInput = ownerChoice?.querySelector("[data-owner-other-input]");
+    const ownerField = ownerChoice?.querySelector('[data-field="owner"]');
+    ownerChoice?.querySelector(".owner-other-field")?.classList.toggle("is-hidden", !ownerOther.checked);
+    if (ownerField) ownerField.value = ownerOther.checked ? ownerInput?.value.trim() || "" : DEFAULT_OWNER;
+    if (ownerOther.checked) ownerInput?.focus();
+    return;
+  }
+
   const doneCheck = event.target.closest("[data-done-check]");
   if (doneCheck) {
     const taskId = doneCheck.closest("[data-task-id]")?.dataset.taskId;
@@ -1148,6 +1411,14 @@ document.addEventListener("change", (event) => {
     historyText = `Responsable / espera: ${field.value.trim()}`;
   }
   updateTask(task.id, { [fieldName]: field.value }, historyText);
+});
+
+document.addEventListener("input", (event) => {
+  const ownerInput = event.target.closest("[data-owner-other-input]");
+  if (!ownerInput) return;
+  const ownerChoice = ownerInput.closest(".owner-choice");
+  const ownerField = ownerChoice?.querySelector('[data-field="owner"]');
+  if (ownerField) ownerField.value = ownerInput.value.trim();
 });
 
 function collectDecisionFields(taskId) {
@@ -1368,6 +1639,17 @@ function toggleTaskHistory(taskId) {
     expanded.add(taskId);
   }
   state.expandedHistoryTaskIds = [...expanded];
+  saveAndRender();
+}
+
+function toggleCompletedWeek(weekKey) {
+  const expanded = new Set(state.expandedCompletedWeekKeys || []);
+  if (expanded.has(weekKey)) {
+    expanded.delete(weekKey);
+  } else {
+    expanded.add(weekKey);
+  }
+  state.expandedCompletedWeekKeys = [...expanded];
   saveAndRender();
 }
 
