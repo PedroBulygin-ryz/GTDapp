@@ -19,6 +19,8 @@ const defaultState = {
   selectedOrganizeTaskId: "",
   expandedHistoryTaskIds: [],
   historyPage: 0,
+  donePage: 0,
+  reviewDoneOpen: false,
   showShortcutHelp: false,
 };
 
@@ -345,6 +347,13 @@ function renderReviewView() {
   const waitingWithoutOwner = waiting.filter((task) => !task.owner.trim());
   const waitingWithoutDate = waiting.filter((task) => !task.dueDate);
   const done = getTasks("done");
+  const donePageSize = 5;
+  const donePageCount = Math.max(1, Math.ceil(done.length / donePageSize));
+  if (state.donePage >= donePageCount) state.donePage = donePageCount - 1;
+  const visibleDone = done.slice(
+    state.donePage * donePageSize,
+    state.donePage * donePageSize + donePageSize,
+  );
   const recentHistory = getRecentHistory();
   const historyPageSize = 5;
   const historyPageCount = Math.max(1, Math.ceil(recentHistory.length / historyPageSize));
@@ -381,11 +390,18 @@ function renderReviewView() {
     </section>
 
     <section class="stage-list">
-      <div class="section-title">
+      <button class="section-title section-title-button" data-toggle-done-list>
         <h3>Tareas cerradas</h3>
-        <span>${done.length}</span>
-      </div>
-      ${renderDoneList(done)}
+        <div class="section-title-meta">
+          <small>${state.reviewDoneOpen ? "Ocultar" : "Abrir"}</small>
+          <span>${done.length}</span>
+        </div>
+      </button>
+      ${
+        state.reviewDoneOpen
+          ? `${renderDoneList(visibleDone)}${renderDonePagination(done.length, donePageCount)}`
+          : ""
+      }
     </section>
 
     <section class="stage-list">
@@ -640,6 +656,17 @@ function renderDoneList(tasks) {
   `;
 }
 
+function renderDonePagination(total, pageCount) {
+  if (total <= 5) return "";
+  return `
+    <div class="pagination">
+      <button class="secondary-button" data-done-page="prev" ${state.donePage === 0 ? "disabled" : ""}>Anterior</button>
+      <span>Pagina ${state.donePage + 1} de ${pageCount}</span>
+      <button class="secondary-button" data-done-page="next" ${state.donePage >= pageCount - 1 ? "disabled" : ""}>Siguiente</button>
+    </div>
+  `;
+}
+
 function renderDoPanel(task) {
   const checklist = task.doneChecklist || {};
   return `
@@ -854,6 +881,21 @@ document.addEventListener("click", (event) => {
   const taskHistoryToggle = event.target.closest("[data-toggle-task-history]");
   if (taskHistoryToggle) {
     toggleTaskHistory(taskHistoryToggle.dataset.toggleTaskHistory);
+    return;
+  }
+
+  if (event.target.closest("[data-toggle-done-list]")) {
+    state.reviewDoneOpen = !state.reviewDoneOpen;
+    state.donePage = 0;
+    saveAndRender();
+    return;
+  }
+
+  const donePageButton = event.target.closest("[data-done-page]");
+  if (donePageButton && !donePageButton.disabled) {
+    state.donePage += donePageButton.dataset.donePage === "next" ? 1 : -1;
+    if (state.donePage < 0) state.donePage = 0;
+    saveAndRender();
     return;
   }
 
