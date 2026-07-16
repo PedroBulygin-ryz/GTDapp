@@ -266,7 +266,7 @@ function renderShortcutHelp() {
     <aside class="shortcut-help">
       <button class="close-details" data-toggle-shortcut-help title="Cerrar ayuda">×</button>
       <h3>Capturas rapidas con atajos</h3>
-      <p><strong>Option + Space</strong>: abre una ventanita para escribir una captura y guardarla en <code>inbox.txt</code>.</p>
+      <p><strong>Control + Option + B</strong>: abre una ventanita para escribir una captura y guardarla en <code>inbox.txt</code>.</p>
       <p><strong>Control + Option + Delete</strong>: vacia <code>inbox.txt</code> despues de confirmar.</p>
       <p>En esta pestaña, toca <strong>Revisar inbox.txt</strong>, selecciona el archivo y luego <strong>Importar</strong> para traer esas capturas a Recopilar.</p>
     </aside>

@@ -23,7 +23,7 @@ Las tareas se guardan localmente en el navegador de cada persona. Eso significa 
 
 La app puede importar tareas desde un archivo `inbox.txt`. Al abrir la app como archivo local, el navegador puede pedir seleccionarlo manualmente.
 
-Los scripts `capturar-bubbles.sh` y `vaciar-inbox-bubbles.sh` son atajos opcionales para macOS.
+Los scripts `capturar-bubbles.sh` y `vaciar-inbox-bubbles.sh` son atajos opcionales para macOS. La captura rapida usa `Control + Option + B`; vaciar el archivo usa `Control + Option + Delete`.
 
 ## Archivos principales
 
