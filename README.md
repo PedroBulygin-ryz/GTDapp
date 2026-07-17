@@ -25,7 +25,15 @@ La app tambien puede conectarse a un archivo local `bubbles-data.json` desde la 
 
 La app puede importar tareas desde un archivo `inbox.txt`. Al abrir la app como archivo local, el navegador puede pedir seleccionarlo manualmente.
 
-Los scripts `capturar-bubbles.sh` y `vaciar-inbox-bubbles.sh` son atajos opcionales para macOS. La captura rapida usa `Control + Option + B`; vaciar el archivo usa `Control + Option + Delete`.
+`Bubbles Capture.app` es una mini app local para macOS que queda abierta en segundo plano. Con esa app abierta, `Control + Option + B` muestra una ventanita para escribir una captura y guardarla en `inbox.txt`.
+
+Para reconstruirla:
+
+```sh
+./build-capture-app.sh
+```
+
+Los scripts `capturar-bubbles.sh` y `vaciar-inbox-bubbles.sh` quedan como respaldo opcional. Vaciar el archivo usa `Control + Option + Delete`.
 
 ## Archivos principales
 
