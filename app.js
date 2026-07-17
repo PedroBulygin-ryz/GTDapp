@@ -614,6 +614,7 @@ function renderDoView() {
 
 function renderHistoryView() {
   const weeks = getCompletedWeeks();
+  const todayTasks = getCompletedToday();
   initializeCompletedWeeks(weeks);
   els.focus.innerHTML = `
     <header class="stage-header">
@@ -624,6 +625,18 @@ function renderHistoryView() {
         <p>Revisa lo cerrado por semana. Sirve para ver progreso sin mezclarlo con la revision del sistema.</p>
       </div>
     </header>
+
+    <section class="today-completed">
+      <div>
+        <p class="stage-label">Hoy</p>
+        <h3>Terminadas hoy</h3>
+        <p>${todayTasks.length ? "Cierres registrados durante el dia actual." : "Todavia no cerraste tareas hoy."}</p>
+      </div>
+      <span>${todayTasks.length}</span>
+      <div class="today-completed-list">
+        ${todayTasks.length ? renderCompletedTaskCards(todayTasks) : `<div class="empty">Nada cerrado hoy por ahora.</div>`}
+      </div>
+    </section>
 
     <section class="stage-list">
       <div class="section-title">
@@ -885,6 +898,10 @@ function renderCompletedWeeks(weeks) {
 }
 
 function renderCompletedWeekTasks(tasks) {
+  return renderCompletedTaskCards(tasks);
+}
+
+function renderCompletedTaskCards(tasks) {
   return `
     <div class="task-list">
       ${tasks
@@ -1077,6 +1094,14 @@ function getCompletedWeeks() {
       ...week,
       label: `Semana del ${formatWeekDay(week.start)} al ${formatWeekDay(week.end)}`,
     }));
+}
+
+function getCompletedToday() {
+  const todayKey = toDateKey(new Date());
+  return sortByCompletedDate(getTasks("done")).filter((task) => {
+    const closedAt = parseDate(task.completedAt || task.updatedAt);
+    return closedAt && toDateKey(closedAt) === todayKey;
+  });
 }
 
 function initializeCompletedWeeks(weeks) {
@@ -1456,7 +1481,6 @@ function refreshQuickInbox() {
     quickInbox.status = "Selecciona el archivo inbox.txt";
     const input = document.querySelector("[data-quick-inbox-file]");
     input?.click();
-    saveAndRender();
     return;
   }
 
