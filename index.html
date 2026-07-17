@@ -464,6 +464,37 @@ h1 {
   font-size: 0.86rem;
 }
 
+.due-review-card {
+  min-height: 180px;
+}
+
+.due-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.due-summary div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 8px;
+}
+
+.due-summary dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.due-summary dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
 .decision-panel,
 .decision-card {
   min-width: 0;
@@ -1177,6 +1208,7 @@ const defaultState = {
   historyPage: 0,
   donePage: 0,
   reviewDoneOpen: false,
+  reviewHistoryOpen: false,
   expandedCompletedWeekKeys: null,
   showShortcutHelp: false,
 };
@@ -1657,6 +1689,7 @@ function renderReviewView() {
   const projectsWithoutAction = projects.filter((task) => !task.nextAction.trim());
   const waitingWithoutOwner = waiting.filter((task) => !task.owner.trim());
   const waitingWithoutDate = waiting.filter((task) => !task.dueDate);
+  const dueSummary = getReviewDueSummary();
   const done = getTasks("done");
   const donePageSize = 5;
   const donePageCount = Math.max(1, Math.ceil(done.length / donePageSize));
@@ -1689,6 +1722,7 @@ function renderReviewView() {
       ${renderReviewCard("Proyectos sin proxima accion", projectsWithoutAction.length, projectsWithoutAction.length === 0, "Todo proyecto necesita un siguiente paso concreto.")}
       ${renderReviewCard("Esperas sin responsable", waitingWithoutOwner.length, waitingWithoutOwner.length === 0, "Toda espera necesita saber de quien depende.")}
       ${renderReviewCard("Esperas sin fecha", waitingWithoutDate.length, waitingWithoutDate.length === 0, "Si no hay plazo, conviene revisar o hacer follow up diario.")}
+      ${renderDueReviewCard(dueSummary)}
       ${renderReviewCard("Proximas acciones listas", next.length, next.length > 0, "Estas son las opciones para pasar a Hacer.")}
     </section>
 
@@ -1716,12 +1750,18 @@ function renderReviewView() {
     </section>
 
     <section class="stage-list">
-      <div class="section-title">
+      <button class="section-title section-title-button" data-toggle-review-history>
         <h3>Historial reciente</h3>
-        <span>${recentHistory.length}</span>
-      </div>
-      ${renderRecentHistory(visibleHistory)}
-      ${renderHistoryPagination(recentHistory.length, historyPageCount)}
+        <div class="section-title-meta">
+          <small>${state.reviewHistoryOpen ? "Ocultar" : "Abrir"}</small>
+          <span>${recentHistory.length}</span>
+        </div>
+      </button>
+      ${
+        state.reviewHistoryOpen
+          ? `${renderRecentHistory(visibleHistory)}${renderHistoryPagination(recentHistory.length, historyPageCount)}`
+          : ""
+      }
     </section>
   `;
 }
@@ -1986,6 +2026,35 @@ function renderReviewCard(title, count, ok, hint) {
       <span>${count}</span>
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(hint)}</p>
+    </article>
+  `;
+}
+
+function renderDueReviewCard(summary) {
+  const needsWork = summary.overdue > 0 || summary.today > 0;
+  return `
+    <article class="review-card due-review-card ${needsWork ? "needs-work" : "ok"}">
+      <span>${summary.next7}</span>
+      <h3>Vencimientos</h3>
+      <p>No incluye tareas cerradas.</p>
+      <dl class="due-summary">
+        <div>
+          <dt>Vencidas</dt>
+          <dd>${summary.overdue}</dd>
+        </div>
+        <div>
+          <dt>Hoy</dt>
+          <dd>${summary.today}</dd>
+        </div>
+        <div>
+          <dt>Mañana</dt>
+          <dd>${summary.tomorrow}</dd>
+        </div>
+        <div>
+          <dt>7 dias</dt>
+          <dd>${summary.next7}</dd>
+        </div>
+      </dl>
     </article>
   `;
 }
@@ -2255,6 +2324,26 @@ function getCompletedToday() {
   });
 }
 
+function getReviewDueSummary() {
+  const today = startOfDay(new Date());
+  const tomorrow = addDays(today, 1);
+  const weekLimit = addDays(today, 7);
+  return state.tasks
+    .filter((task) => task.bubble !== "done" && task.dueDate)
+    .reduce(
+      (summary, task) => {
+        const due = parseDueDate(task.dueDate);
+        if (!due) return summary;
+        if (due < today) summary.overdue += 1;
+        if (toDateKey(due) === toDateKey(today)) summary.today += 1;
+        if (toDateKey(due) === toDateKey(tomorrow)) summary.tomorrow += 1;
+        if (due >= today && due <= weekLimit) summary.next7 += 1;
+        return summary;
+      },
+      { overdue: 0, today: 0, tomorrow: 0, next7: 0 },
+    );
+}
+
 function initializeCompletedWeeks(weeks) {
   if (Array.isArray(state.expandedCompletedWeekKeys)) return;
   state.expandedCompletedWeekKeys = weeks[0] ? [weeks[0].key] : [];
@@ -2278,11 +2367,16 @@ function parseDate(value) {
 }
 
 function getWeekStart(date) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
+  const start = startOfDay(date);
   const day = start.getDay() || 7;
   start.setDate(start.getDate() - day + 1);
   return start;
+}
+
+function startOfDay(date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
 }
 
 function addDays(date, days) {
@@ -2460,6 +2554,13 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-toggle-done-list]")) {
     state.reviewDoneOpen = !state.reviewDoneOpen;
     state.donePage = 0;
+    saveAndRender();
+    return;
+  }
+
+  if (event.target.closest("[data-toggle-review-history]")) {
+    state.reviewHistoryOpen = !state.reviewHistoryOpen;
+    state.historyPage = 0;
     saveAndRender();
     return;
   }

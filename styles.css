@@ -457,6 +457,37 @@ h1 {
   font-size: 0.86rem;
 }
 
+.due-review-card {
+  min-height: 180px;
+}
+
+.due-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.due-summary div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  padding: 8px;
+}
+
+.due-summary dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.due-summary dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
 .decision-panel,
 .decision-card {
   min-width: 0;
