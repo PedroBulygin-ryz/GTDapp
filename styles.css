@@ -829,6 +829,20 @@ h1 {
   opacity: 0.55;
 }
 
+.organize-card.moving {
+  border-color: var(--green);
+  background: var(--mint);
+  box-shadow: 0 0 0 3px rgba(31, 138, 112, 0.12);
+}
+
+.organize-card.move-target {
+  cursor: pointer;
+}
+
+.organize-card.move-target:hover {
+  border-color: var(--green);
+}
+
 .organize-card.expanded {
   align-items: start;
   border-color: var(--green);
@@ -958,6 +972,12 @@ h1 {
 
 .drag-handle:active {
   cursor: grabbing;
+}
+
+.drag-handle.active {
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
 }
 
 .task-details {

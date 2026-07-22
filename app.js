@@ -28,6 +28,8 @@ const defaultState = {
   reviewDoneOpen: false,
   reviewHistoryOpen: false,
   expandedCompletedWeekKeys: null,
+  movingOrganizeTaskId: "",
+  movingOrganizeBubble: "",
   showShortcutHelp: false,
 };
 
@@ -341,6 +343,8 @@ function setView(view) {
   state.currentView = view;
   state.selectedTaskId = "";
   state.selectedOrganizeTaskId = "";
+  state.movingOrganizeTaskId = "";
+  state.movingOrganizeBubble = "";
   state.historyPage = 0;
   saveAndRender();
   els.focus.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -809,7 +813,7 @@ function renderOrganizeTaskList(tasks, bubbleId) {
       ${tasks
         .map(
           (task) => `
-            <article class="task-card organize-card ${state.selectedOrganizeTaskId === task.id ? "expanded" : ""}" data-task-id="${task.id}" data-drag-task="${task.id}" data-drop-task="${task.id}" data-bubble="${bubbleId}">
+            <article class="task-card organize-card ${state.selectedOrganizeTaskId === task.id ? "expanded" : ""} ${state.movingOrganizeTaskId === task.id ? "moving" : ""} ${state.movingOrganizeTaskId && state.movingOrganizeBubble === bubbleId && state.movingOrganizeTaskId !== task.id ? "move-target" : ""}" data-task-id="${task.id}" data-drag-task="${task.id}" data-drop-task="${task.id}" data-bubble="${bubbleId}">
               <div class="organize-summary" data-open-organize-task="${task.id}">
                 <h3>${escapeHtml(task.title)}</h3>
                 ${renderDueBadge(task)}
@@ -817,7 +821,7 @@ function renderOrganizeTaskList(tasks, bubbleId) {
                 <p class="task-meta">Ingresada: ${formatDate(task.createdAt)}</p>
               </div>
               <div class="mini-actions">
-                <button class="drag-handle" draggable="true" data-drag-handle="${task.id}" data-bubble="${bubbleId}" title="Arrastrar para ordenar">↕</button>
+                <button class="drag-handle ${state.movingOrganizeTaskId === task.id ? "active" : ""}" draggable="true" data-drag-handle="${task.id}" data-bubble="${bubbleId}" title="Mover tarea">↕</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="next" title="Mover a proximas acciones">A</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="projects" title="Mover a proyectos">P</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="waiting" title="Mover a en espera">E</button>
@@ -1306,9 +1310,34 @@ function escapeAttr(value = "") {
 }
 
 document.addEventListener("click", (event) => {
+  const moveHandle = event.target.closest("[data-drag-handle]");
+  if (moveHandle) {
+    event.preventDefault();
+    toggleOrganizeMoveMode(moveHandle.dataset.dragHandle, moveHandle.dataset.bubble);
+    return;
+  }
+
+  if (state.movingOrganizeTaskId && state.currentView === "organize") {
+    const targetCard = event.target.closest("[data-drop-task]");
+    const targetList = event.target.closest("[data-drop-bubble]");
+    const targetBubble = targetCard?.dataset.bubble || targetList?.dataset.dropBubble;
+    if (targetBubble === state.movingOrganizeBubble) {
+      event.preventDefault();
+      reorderOrganizeTask(
+        state.movingOrganizeTaskId,
+        targetCard?.dataset.dropTask || "",
+        targetBubble,
+        targetCard ? "before" : "after",
+      );
+      clearOrganizeMoveMode();
+      return;
+    }
+  }
+
   const closeOrganizeTask = event.target.closest("[data-close-organize-task]");
   if (closeOrganizeTask) {
     state.selectedOrganizeTaskId = "";
+    clearOrganizeMoveMode(false);
     saveAndRender();
     return;
   }
@@ -1831,6 +1860,23 @@ function toggleCompletedWeek(weekKey) {
 function sortOrganizeBubbleByDate(bubbleId) {
   const sortedIds = sortByDueDate(getTasks(bubbleId)).map((task) => task.id);
   applyTaskOrder(sortedIds);
+}
+
+function toggleOrganizeMoveMode(taskId, bubbleId) {
+  if (state.movingOrganizeTaskId === taskId) {
+    clearOrganizeMoveMode();
+    return;
+  }
+  state.movingOrganizeTaskId = taskId;
+  state.movingOrganizeBubble = bubbleId;
+  state.selectedOrganizeTaskId = "";
+  saveAndRender();
+}
+
+function clearOrganizeMoveMode(shouldRender = true) {
+  state.movingOrganizeTaskId = "";
+  state.movingOrganizeBubble = "";
+  if (shouldRender) saveAndRender();
 }
 
 function reorderOrganizeTask(taskId, targetId, bubbleId, place = "after") {
