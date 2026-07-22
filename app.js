@@ -46,6 +46,10 @@ let quickInbox = {
   lines: [],
   status: "Sin revisar",
 };
+let dragState = {
+  taskId: "",
+  bubble: "",
+};
 
 const els = {
   focus: document.querySelector("#focus-view"),
@@ -94,9 +98,10 @@ function normalizeState(nextState) {
   return {
     ...defaultState,
     ...nextState,
-    tasks: (nextState.tasks || []).map((task) => ({
+    tasks: (nextState.tasks || []).map((task, index) => ({
       ...task,
       owner: task.owner?.trim() || DEFAULT_OWNER,
+      order: Number.isFinite(task.order) ? task.order : index + 1,
     })),
   };
 }
@@ -198,6 +203,7 @@ function createTask(title) {
     completedAt: "",
     nextAction: "",
     owner: DEFAULT_OWNER,
+    order: getNextOrder("inbox"),
     status: "unprocessed",
     doneChecklist: {
       verified: false,
@@ -217,7 +223,8 @@ function createTask(title) {
 
 function createTasks(titles, sourceText = "Importada desde capturas rapidas") {
   const now = new Date().toISOString();
-  const newTasks = titles.map((title) => ({
+  const firstOrder = getNextOrder("inbox");
+  const newTasks = titles.map((title, index) => ({
     id: uid(),
     title,
     notes: "",
@@ -228,6 +235,7 @@ function createTasks(titles, sourceText = "Importada desde capturas rapidas") {
     completedAt: "",
     nextAction: "",
     owner: DEFAULT_OWNER,
+    order: firstOrder + index,
     status: "unprocessed",
     doneChecklist: {
       verified: false,
@@ -284,7 +292,9 @@ function processTask(id, patch) {
   const targetTitle = BUBBLES.find((bubble) => bubble.id === targetBubble)?.title;
   const historyText =
     targetTitle && targetBubble !== task?.bubble ? `Movida a ${targetTitle}` : "";
-  updateTask(id, { status: "processed", ...patch }, historyText);
+  const orderPatch =
+    targetBubble && targetBubble !== task?.bubble ? { order: getNextOrder(targetBubble) } : {};
+  updateTask(id, { status: "processed", ...orderPatch, ...patch }, historyText);
 }
 
 function getTasks(bubble) {
@@ -298,6 +308,22 @@ function sortByDueDate(tasks) {
     if (aTime !== bTime) return aTime - bTime;
     return new Date(a.createdAt || a.updatedAt) - new Date(b.createdAt || b.updatedAt);
   });
+}
+
+function sortByManualOrder(tasks) {
+  return [...tasks].sort((a, b) => {
+    const aOrder = Number.isFinite(a.order) ? a.order : Number.POSITIVE_INFINITY;
+    const bOrder = Number.isFinite(b.order) ? b.order : Number.POSITIVE_INFINITY;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return new Date(a.createdAt || a.updatedAt) - new Date(b.createdAt || b.updatedAt);
+  });
+}
+
+function getNextOrder(bubble) {
+  const orders = state.tasks
+    .filter((task) => task.bubble === bubble)
+    .map((task) => (Number.isFinite(task.order) ? task.order : 0));
+  return orders.length ? Math.max(...orders) + 1 : 1;
 }
 
 function dueDateTime(value) {
@@ -480,7 +506,7 @@ function renderOrganizeView() {
     <section class="organize-grid">
       ${organizedBubbles
         .map((bubble) => {
-          const tasks = sortByDueDate(getTasks(bubble.id));
+          const tasks = sortByManualOrder(getTasks(bubble.id));
           return `
             <article class="bubble compact-bubble">
               <header>
@@ -488,9 +514,12 @@ function renderOrganizeView() {
                   <h2>${bubble.title}</h2>
                   <small>${bubble.hint}</small>
                 </div>
-                <span class="bubble-count">${tasks.length}</span>
+                <div class="bubble-actions">
+                  <span class="bubble-count">${tasks.length}</span>
+                  <button class="secondary-button compact-button" data-sort-bubble-date="${bubble.id}" ${tasks.length < 2 ? "disabled" : ""}>Ordenar por fecha</button>
+                </div>
               </header>
-              ${renderOrganizeTaskList(tasks)}
+              ${renderOrganizeTaskList(tasks, bubble.id)}
             </article>
           `;
         })
@@ -773,15 +802,14 @@ function renderEmptyProcessing() {
   `;
 }
 
-function renderOrganizeTaskList(tasks) {
-  if (!tasks.length) return `<div class="empty">Sin pendientes</div>`;
-  const sortedTasks = sortByDueDate(tasks);
+function renderOrganizeTaskList(tasks, bubbleId) {
+  if (!tasks.length) return `<div class="empty" data-drop-bubble="${bubbleId}">Sin pendientes</div>`;
   return `
-    <div class="task-list">
-      ${sortedTasks
+    <div class="task-list organize-task-list" data-drop-bubble="${bubbleId}">
+      ${tasks
         .map(
           (task) => `
-            <article class="task-card organize-card ${state.selectedOrganizeTaskId === task.id ? "expanded" : ""}" data-task-id="${task.id}">
+            <article class="task-card organize-card ${state.selectedOrganizeTaskId === task.id ? "expanded" : ""}" data-task-id="${task.id}" data-drag-task="${task.id}" data-drop-task="${task.id}" data-bubble="${bubbleId}">
               <div class="organize-summary" data-open-organize-task="${task.id}">
                 <h3>${escapeHtml(task.title)}</h3>
                 ${renderDueBadge(task)}
@@ -789,6 +817,7 @@ function renderOrganizeTaskList(tasks) {
                 <p class="task-meta">Ingresada: ${formatDate(task.createdAt)}</p>
               </div>
               <div class="mini-actions">
+                <button class="drag-handle" draggable="true" data-drag-handle="${task.id}" data-bubble="${bubbleId}" title="Arrastrar para ordenar">↕</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="next" title="Mover a proximas acciones">A</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="projects" title="Mover a proyectos">P</button>
                 <button class="icon-button" data-move-task="${task.id}" data-target="waiting" title="Mover a en espera">E</button>
@@ -1301,6 +1330,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const sortBubbleDate = event.target.closest("[data-sort-bubble-date]");
+  if (sortBubbleDate && !sortBubbleDate.disabled) {
+    sortOrganizeBubbleByDate(sortBubbleDate.dataset.sortBubbleDate);
+    return;
+  }
+
   if (event.target.closest("[data-open-data-file]")) {
     connectDataFile();
     return;
@@ -1514,6 +1549,52 @@ document.addEventListener("input", (event) => {
   const ownerChoice = ownerInput.closest(".owner-choice");
   const ownerField = ownerChoice?.querySelector('[data-field="owner"]');
   if (ownerField) ownerField.value = ownerInput.value.trim();
+});
+
+document.addEventListener("dragstart", (event) => {
+  const handle = event.target.closest("[data-drag-handle]");
+  if (!handle) return;
+  dragState = {
+    taskId: handle.dataset.dragHandle,
+    bubble: handle.dataset.bubble,
+  };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", dragState.taskId);
+  handle.closest(".organize-card")?.classList.add("dragging");
+});
+
+document.addEventListener("dragover", (event) => {
+  if (!dragState.taskId) return;
+  const dropZone = event.target.closest("[data-drop-bubble], [data-drop-task]");
+  const targetBubble = dropZone?.dataset.dropBubble || dropZone?.dataset.bubble;
+  if (targetBubble !== dragState.bubble) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+});
+
+document.addEventListener("drop", (event) => {
+  if (!dragState.taskId) return;
+  const targetCard = event.target.closest("[data-drop-task]");
+  const dropZone = event.target.closest("[data-drop-bubble]");
+  const targetBubble = targetCard?.dataset.bubble || dropZone?.dataset.dropBubble;
+  if (targetBubble !== dragState.bubble) return;
+  event.preventDefault();
+
+  let place = "after";
+  if (targetCard) {
+    const rect = targetCard.getBoundingClientRect();
+    place = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  }
+
+  reorderOrganizeTask(dragState.taskId, targetCard?.dataset.dropTask || "", targetBubble, place);
+  dragState = { taskId: "", bubble: "" };
+});
+
+document.addEventListener("dragend", () => {
+  dragState = { taskId: "", bubble: "" };
+  document.querySelectorAll(".organize-card.dragging").forEach((card) => {
+    card.classList.remove("dragging");
+  });
 });
 
 function collectDecisionFields(taskId) {
@@ -1744,6 +1825,33 @@ function toggleCompletedWeek(weekKey) {
     expanded.add(weekKey);
   }
   state.expandedCompletedWeekKeys = [...expanded];
+  saveAndRender();
+}
+
+function sortOrganizeBubbleByDate(bubbleId) {
+  const sortedIds = sortByDueDate(getTasks(bubbleId)).map((task) => task.id);
+  applyTaskOrder(sortedIds);
+}
+
+function reorderOrganizeTask(taskId, targetId, bubbleId, place = "after") {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task || task.bubble !== bubbleId) return;
+  if (targetId === taskId) return;
+  const ids = sortByManualOrder(getTasks(bubbleId))
+    .map((item) => item.id)
+    .filter((id) => id !== taskId);
+  const targetIndex = targetId ? ids.indexOf(targetId) : -1;
+  const insertIndex =
+    targetIndex < 0 ? ids.length : targetIndex + (place === "after" ? 1 : 0);
+  ids.splice(insertIndex, 0, taskId);
+  applyTaskOrder(ids);
+}
+
+function applyTaskOrder(orderedIds) {
+  const orderById = new Map(orderedIds.map((id, index) => [id, index + 1]));
+  state.tasks = state.tasks.map((task) =>
+    orderById.has(task.id) ? { ...task, order: orderById.get(task.id) } : task,
+  );
   saveAndRender();
 }
 
