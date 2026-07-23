@@ -858,6 +858,21 @@ h1 {
   background: #f3fbf6;
 }
 
+.history-done-card {
+  align-items: center;
+  grid-template-columns: 1fr auto;
+}
+
+.closed-day-mark {
+  align-self: center;
+  color: rgba(102, 115, 108, 0.24);
+  font-size: clamp(1.1rem, 3vw, 2rem);
+  font-weight: 900;
+  letter-spacing: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .today-completed {
   display: grid;
   grid-template-columns: 1fr auto;

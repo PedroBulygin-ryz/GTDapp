@@ -978,11 +978,12 @@ function renderCompletedTaskCards(tasks) {
       ${tasks
         .map((task) => {
           const lastAction = getLastActionText(task);
+          const closedAt = task.completedAt || task.updatedAt;
           return `
-            <article class="task-card compact-card done-card">
+            <article class="task-card compact-card done-card history-done-card">
               <div>
                 <h3>${escapeHtml(task.title)}</h3>
-                <p>Cerrada: ${formatDate(task.completedAt || task.updatedAt)}</p>
+                <p>Cerrada: ${formatDate(closedAt)}</p>
                 <p class="task-meta">Ingresada: ${formatDate(task.createdAt)}</p>
                 ${
                   lastAction
@@ -990,6 +991,7 @@ function renderCompletedTaskCards(tasks) {
                     : `<p class="task-meta">${(task.history || []).length} movimientos registrados</p>`
                 }
               </div>
+              <strong class="closed-day-mark">${escapeHtml(formatWeekdayName(closedAt))}</strong>
             </article>
           `;
         })
@@ -1248,6 +1250,14 @@ function formatWeekDay(date) {
     day: "2-digit",
     month: "short",
   }).format(date);
+}
+
+function formatWeekdayName(value) {
+  const date = parseDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat("es-AR", {
+    weekday: "long",
+  }).format(date).toUpperCase();
 }
 
 function getLastActionText(task) {
